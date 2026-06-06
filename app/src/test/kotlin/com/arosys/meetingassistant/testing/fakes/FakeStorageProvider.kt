@@ -64,6 +64,15 @@ class FakeStorageProvider : StorageProvider {
     override suspend fun getTranscript(meetingId: Long): List<TranscriptEntry> =
         entries.filter { it.meetingId == meetingId }
 
+    override suspend fun updateTranslation(entryId: Long, englishText: String) {
+        val idx = entries.indexOfFirst { it.id == entryId }
+        if (idx >= 0) {
+            entries[idx] = entries[idx].copy(englishText = englishText)
+            // Trigger flow update
+            meetingsFlow.update { it }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Analysis
     // -------------------------------------------------------------------------

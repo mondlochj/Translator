@@ -18,6 +18,9 @@ interface TranscriptDao {
     @Query("SELECT * FROM transcript_entries WHERE meetingId = :meetingId ORDER BY timestampMs ASC")
     suspend fun getByMeeting(meetingId: Long): List<TranscriptEntryEntity>
 
+    @Query("UPDATE transcript_entries SET englishText = :english WHERE id = :id")
+    suspend fun updateEnglish(id: Long, english: String)
+
     @Query("""
         SELECT * FROM transcript_entries
         WHERE spanishText LIKE '%' || :query || '%'

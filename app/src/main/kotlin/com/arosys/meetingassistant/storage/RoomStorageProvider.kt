@@ -37,6 +37,9 @@ class RoomStorageProvider(private val db: AppDatabase) : StorageProvider {
     override suspend fun getTranscript(meetingId: Long): List<TranscriptEntry> =
         transcriptDao.getByMeeting(meetingId).map { it.toEntry() }
 
+    override suspend fun updateTranslation(entryId: Long, englishText: String) =
+        transcriptDao.updateEnglish(entryId, englishText)
+
     override suspend fun saveMeetingAnalysis(analysis: MeetingAnalysis) {
         // Phase 4 — entity and DAO will be added then
     }

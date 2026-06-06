@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
 import android.util.Log
+import com.arosys.meetingassistant.MeetingAssistantApp
 import com.arosys.meetingassistant.R
 import com.arosys.meetingassistant.audio.MicrophoneAudioSource
 import com.arosys.meetingassistant.core.interfaces.SpeechRecognizer
@@ -101,6 +102,11 @@ class TranscriptionService : Service() {
                 )
 
                 val meetingId = storage.createMeeting(meetingTitle)
+                (application as MeetingAssistantApp).meetingSession.setMeetingId(meetingId)
+
+                // Start TranslationService alongside transcription
+                startService(Intent(this@TranscriptionService, TranslationService::class.java))
+
                 val micSource = MicrophoneAudioSource().also { mic = it }
                 micSource.startRecording()
 
@@ -151,7 +157,6 @@ class TranscriptionService : Service() {
         }
 
         _uiState.value = _uiState.value.copy(partialText = "")
-
         if (segment.text.isBlank()) return
 
         val entry = TranscriptEntry(
@@ -160,10 +165,16 @@ class TranscriptionService : Service() {
             spanishText = segment.text,
             isFinal = true,
         )
-        storage.saveTranscriptEntry(entry)
+        val savedId = storage.saveTranscriptEntry(entry)
+        val savedEntry = entry.copy(id = savedId)
 
         _uiState.value = _uiState.value.copy(
-            transcriptEntries = _uiState.value.transcriptEntries + entry
+            transcriptEntries = _uiState.value.transcriptEntries + savedEntry
+        )
+
+        // Dispatch to TranslationService via MeetingSession
+        (application as MeetingAssistantApp).meetingSession.submitForTranslation(
+            PendingTranslation(savedId, segment.text, meetingId)
         )
     }
 

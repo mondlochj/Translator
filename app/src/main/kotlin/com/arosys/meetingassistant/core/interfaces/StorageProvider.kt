@@ -21,6 +21,9 @@ interface StorageProvider {
     fun observeTranscript(meetingId: Long): Flow<List<TranscriptEntry>>
     suspend fun getTranscript(meetingId: Long): List<TranscriptEntry>
 
+    /** Updates the English translation for an existing transcript entry (Phase 2+). */
+    suspend fun updateTranslation(entryId: Long, englishText: String)
+
     // -------------------------------------------------------------------------
     // Analysis (Phase 4+)
     // -------------------------------------------------------------------------

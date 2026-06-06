@@ -1,6 +1,6 @@
 # Arosys Meeting Assistant — Project Tracking
 
-**Last Updated:** 2026-06-06 (accelerator module + test infrastructure added)
+**Last Updated:** 2026-06-06 (Phase 2 — live English translation implemented)
 **Target Device:** Samsung Galaxy Fold series
 **Primary Use Case:** Bilingual (Spanish/English) business meetings in Guatemala
 
@@ -257,7 +257,7 @@ Test results are published as a GitHub check via `dorny/test-reporter`.
 | Phase | Name | Status | Started | Completed | Notes |
 |-------|------|--------|---------|-----------|-------|
 | 1 | Live Spanish Transcription | **In Progress** | 2026-06-06 | — | Impl complete; needs model files |
-| 2 | Live English Translation | **Not Started** | — | — | Depends on Phase 1 |
+| 2 | Live English Translation | **In Progress** | 2026-06-06 | — | Impl complete; needs model files |
 | 3 | Earbud Assistance Mode | **Not Started** | — | — | Depends on Phase 2 |
 | 4 | AI Meeting Intelligence | **Not Started** | — | — | Depends on Phase 3 |
 | 5 | Smart Real-Time Filtering | **Not Started** | — | — | Depends on Phase 4 |
@@ -350,14 +350,14 @@ User places phone on table → live Spanish transcription appears on screen with
 
 ## Phase 2 — Live English Translation
 
-**Status:** Not Started
+**Status:** In Progress
 **Depends on:** Phase 1 complete and benchmarked
 **Objective:** Streaming Spanish → English translation with < 2s latency.
 
 ### Features
-- [ ] Streaming translation (does not wait for complete sentences)
-- [ ] Parallel display: Spanish (top) / English (bottom)
-- [ ] Translation updates continuously as new words arrive
+- [x] Streaming translation (token-by-token; does not wait for complete sentences)
+- [x] Parallel display: Spanish (top) / English (bottom) in each `TranscriptItem`
+- [x] Translation updates continuously — Room Flow propagates partial results to UI
 
 ### UI Layout
 ```
@@ -365,8 +365,7 @@ User places phone on table → live Spanish transcription appears on screen with
 │  [ES] Necesitamos        │
 │       revisar el         │
 │       cronograma.        │
-├─────────────────────────┤
-│  [EN] We need to         │
+│  [EN] We need to         │  ← secondary text colour, updates live
 │       review the         │
 │       schedule.          │
 ├─────────────────────────┤
@@ -376,22 +375,32 @@ User places phone on table → live Spanish transcription appears on screen with
 
 ### Architecture Diagram
 ```
-TranscriptionService → partial Spanish text
-  → TranslationService (foreground)
-    → NLLBTranslationEngine.translate(partialText, "spa", "eng")
-      → NLLB distilled model (local)
-        → partial English text callback
-          → LiveMeetingScreen (dual StateFlow)
+TranscriptionService → final TranscriptEntry (Spanish)
+  → MeetingSession.submitForTranslation(PendingTranslation)
+    → TranslationService (foreground service)
+      → NLLBTranslationEngine.translateStream(spanishText)
+        → token-by-token Flow<TranslationResult>
+          → on isFinal: storage.updateTranslation(entryId, englishText)
+            → Room DAO updateEnglish() → live Flow → UI auto-updates
 ```
 
 ### Deliverables Checklist
-- [ ] `TranslationEngine` interface defined
-- [ ] `TranslationService` implementation
-- [ ] `NLLBTranslationEngine` with NLLB distilled model
-- [ ] Updated `LiveMeetingScreen` with dual-pane layout
-- [ ] Translation result stored alongside transcript in Room
-- [ ] Unit tests: `NLLBTranslationEngineTest`
-- [ ] End-to-end latency test (audio in → English text on screen)
+- [x] `TranslationEngine` interface + `TranslationResult` (isFinal flag, streaming)
+- [x] `MeetingSession` — app-scoped SharedFlow bus (TranscriptionService → TranslationService)
+- [x] `NLLBConfig` — token IDs, tensor names, model constants
+- [x] `SentencePieceTokenizer` — greedy Trie encoder + exact decoder; `forTesting()` factory
+- [x] `NLLBTranslationEngine` — ONNX encoder + greedy decoder loop with per-token streaming
+- [x] `TranslationService` — foreground service; subscribes to MeetingSession; calls storage
+- [x] `StorageProvider.updateTranslation` + Room `TranscriptDao.updateEnglish`
+- [x] `FakeTranslationEngine` — deterministic; records call history; supports translation map
+- [x] `FakeStorageProvider.updateTranslation` — in-memory; triggers observable flow update
+- [x] `TranscriptItem` — already shows English text below Spanish in secondary colour
+- [x] Unit tests: `SentencePieceTokenizerTest` (encode/decode, byte-level, specials)
+- [x] Unit tests: `MeetingSessionTest` (SharedFlow bus, buffering, ID state)
+- [x] Integration tests: `TranslationPipelineTest` (pipeline wiring end-to-end with fakes)
+- [x] `scripts/download_nllb_onnx.py` (optimum ONNX export + vocab + INT8 quantization)
+- [ ] **Run `scripts/download_nllb_onnx.py`** — places model files in `assets/`; required for runtime
+- [ ] First device test and latency benchmark on Galaxy Fold
 - [ ] Build instructions updated
 
 ### Success Criteria

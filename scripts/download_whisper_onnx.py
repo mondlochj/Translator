@@ -30,6 +30,21 @@ ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "app", "src", "main",
 TMP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "arosys_whisper_export")
 
 def check_deps():
+    from packaging.version import Version
+
+    # optimum 2.x moved onnxruntime support to a separate package and changed
+    # import paths.  Pin to the stable 1.x API.
+    try:
+        import optimum as _opt
+        if Version(_opt.__version__) >= Version("2.0.0"):
+            print(f"optimum {_opt.__version__} is installed but these scripts require optimum 1.x.")
+            print("The onnxruntime export API changed in 2.x and is not yet supported here.")
+            print("Downgrade with:")
+            print('  pip install "optimum[onnxruntime]<2.0"')
+            sys.exit(1)
+    except ImportError:
+        pass  # checked below
+
     missing = []
     for pkg in ("transformers", "onnx", "onnxruntime"):
         try:
@@ -39,17 +54,17 @@ def check_deps():
     try:
         from optimum.onnxruntime import ORTModelForSpeechSeq2Seq  # noqa: F401
     except ImportError:
-        missing.append("optimum[onnxruntime]")
+        missing.append('"optimum[onnxruntime]<2.0"')
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
         print("Install with:")
-        print("  pip install optimum[onnxruntime] transformers onnx onnxruntime")
+        print('  pip install "optimum[onnxruntime]<2.0" transformers onnx onnxruntime')
         sys.exit(1)
+
     # torch ≥ 2.6 required — earlier versions have CVE-2025-32434 and are blocked
     # by transformers when loading pytorch_model.bin checkpoints
     try:
         import torch
-        from packaging.version import Version
         if Version(torch.__version__.split("+")[0]) < Version("2.6.0"):
             print(f"PyTorch {torch.__version__} is too old (need ≥ 2.6.0).")
             print("Upgrade with:  pip install --upgrade torch")

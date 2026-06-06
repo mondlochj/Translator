@@ -1,6 +1,6 @@
 # Arosys Meeting Assistant — Project Tracking
 
-**Last Updated:** 2026-06-06 (accelerator module added)
+**Last Updated:** 2026-06-06 (accelerator module + test infrastructure added)
 **Target Device:** Samsung Galaxy Fold series
 **Primary Use Case:** Bilingual (Spanish/English) business meetings in Guatemala
 
@@ -184,6 +184,74 @@ models/                        # Downloaded quantized model files (gitignored)
 
 ---
 
+## Testing Infrastructure
+
+### Stack
+
+| Layer | Tool | Purpose |
+|-------|------|---------|
+| Unit tests | JUnit 4 + MockK | Pure logic; runs on JVM |
+| Coroutine/Flow tests | kotlinx-coroutines-test + Turbine | StateFlow assertions, streaming flows |
+| Android unit tests | Robolectric 4.13 | Tests that need Context (SharedPreferences, Room) without emulator |
+| Instrumented tests | Espresso + Compose UI test | On-device end-to-end (run manually or on Firebase Test Lab) |
+| Coverage | AGP 8.x `enableUnitTestCoverage` | `./gradlew jacocoTestDebugUnitTestReport` |
+| CI | GitHub Actions | Runs on every push and PR |
+
+### Test Infrastructure Files
+
+```
+app/src/test/kotlin/com/arosys/meetingassistant/
+  testing/
+    MainDispatcherRule.kt          JUnit4 rule — installs TestDispatcher as Dispatchers.Main
+    fakes/
+      FakeBenchmarkRunner.kt       Controllable BenchmarkRunner; scripted latency results
+      FakeSpeechRecognizer.kt      Push-driven transcript emitter
+      FakeTranslationEngine.kt     Deterministic translations; records call history
+      FakeTTSProvider.kt           Records spoken utterances; no audio produced
+      FakeLLMProvider.kt           Keyword-matched scripted responses
+      FakeStorageProvider.kt       Fully in-memory Room replacement with live StateFlow
+    fixtures/
+      TranscriptFixtures.kt        Pre-built Spanish/English sentence pairs
+      AudioFixtures.kt             Synthetic audio sources (silence, tone, noise)
+```
+
+### Conventions
+
+- **Fakes over mocks** — prefer the fake implementations above over `mockk {}` for core interfaces. Fakes have real state and produce observable side effects; mocks are for one-off verifications.
+- **Robolectric for Android-dependent unit tests** — annotate with `@RunWith(RobolectricTestRunner::class)` and `@Config(sdk = [33])`.
+- **`MainDispatcherRule` always present** when a test touches coroutines or collects flows.
+- **Turbine for Flow assertions** — use `flow.test { ... }` rather than `toList()` with launch.
+- **One assertion per test** — name tests as sentences (`backtick strings`).
+
+### Running Tests
+
+```bash
+# All unit tests
+./gradlew testDebugUnitTest
+
+# With coverage report (output: app/build/reports/coverage/test/debug/)
+./gradlew jacocoTestDebugUnitTestReport
+
+# Single test class
+./gradlew testDebugUnitTest --tests "*.HardwareAcceleratorManagerTest"
+
+# Instrumented tests (requires connected device or emulator)
+./gradlew connectedDebugAndroidTest
+```
+
+### CI Pipeline (`.github/workflows/ci.yml`)
+
+Triggers: push to `main`, `claude/**`, `feature/**`; all PRs to `main`.
+
+| Job | What it does |
+|-----|-------------|
+| `unit-tests` | `testDebugUnitTest` → coverage report → uploaded as artifact |
+| `lint` | `lintDebug` → report uploaded as artifact |
+
+Test results are published as a GitHub check via `dorny/test-reporter`.
+
+---
+
 ## Phase Status Dashboard
 
 | Phase | Name | Status | Started | Completed | Notes |
@@ -242,7 +310,9 @@ Microphone → AudioRecord buffer
 - [x] Accelerator module: `OrtBackend`, `BenchmarkResult`, `AcceleratorBenchmarkRunner`, `HardwareAcceleratorManager`, `OrtSessionFactory`
 - [x] Project scaffold: `settings.gradle.kts`, `build.gradle.kts`, `app/build.gradle.kts`, `libs.versions.toml`, `AndroidManifest.xml`, `MeetingAssistantApp`
 - [x] Benchmark model generator: `scripts/generate_benchmark_model.py`
-- [x] Unit tests: `OrtBackendTest`, `AcceleratorBenchmarkRunnerTest`
+- [x] Unit tests: `OrtBackendTest`, `AcceleratorBenchmarkRunnerTest`, `HardwareAcceleratorManagerTest` (Robolectric)
+- [x] Test infrastructure: `MainDispatcherRule`, all five fakes, `TranscriptFixtures`, `AudioFixtures`
+- [x] CI pipeline: `.github/workflows/ci.yml` (unit tests + lint on every push)
 - [ ] Run `generate_benchmark_model.py` → commit `benchmark_model.onnx` asset
 - [ ] `TranscriptionService` (foreground, survives screen off)
 - [ ] `WhisperOnnxSpeechRecognizer` (ONNX export of Whisper-tiny or Whisper-base)

@@ -28,6 +28,7 @@ android {
         debug {
             isDebuggable = true
             applicationIdSuffix = ".debug"
+            enableUnitTestCoverage = true  // AGP 8.x — enables jacocoTestDebugUnitTestReport
         }
         release {
             isMinifyEnabled = true
@@ -51,6 +52,15 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true  // required by Robolectric
+            all { test ->
+                test.jvmArgs("-noverify", "-Xmx2g")
+            }
+        }
     }
 
     packaging {
@@ -91,6 +101,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core.ktx)
 
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

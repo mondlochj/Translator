@@ -15,6 +15,21 @@ private const val WARMUP_ITERATIONS = 3
 private const val TIMED_ITERATIONS = 7
 
 /**
+ * Seam interface allowing [HardwareAcceleratorManager] to be tested without
+ * a real ORT runtime.  Production code uses [AcceleratorBenchmarkRunner];
+ * tests inject [com.arosys.meetingassistant.testing.fakes.FakeBenchmarkRunner].
+ */
+interface BenchmarkRunner {
+    suspend fun probeAvailableBackends(modelBytes: ByteArray): List<BackendProbeResult>
+    suspend fun benchmark(
+        modelName: String,
+        modelBytes: ByteArray,
+        config: SessionConfig = SessionConfig(),
+    ): List<BenchmarkResult>
+    suspend fun runMicroBenchmark(): List<BenchmarkResult>
+}
+
+/**
  * Runs inference benchmarks against each [OrtBackend] and returns
  * a [BenchmarkResult] per backend.
  *
@@ -24,7 +39,7 @@ private const val TIMED_ITERATIONS = 7
  *  - **Model-benchmark**: uses the actual production model bytes.  Run on
  *    first model load to get real-world numbers and update the cache.
  */
-class AcceleratorBenchmarkRunner(private val context: Context) {
+class AcceleratorBenchmarkRunner(private val context: Context) : BenchmarkRunner {
 
     private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
 

@@ -39,8 +39,8 @@ private const val CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000L // 7 days
 class HardwareAcceleratorManager private constructor(
     private val context: Context,
     private val scope: CoroutineScope,
+    private val runner: BenchmarkRunner,
 ) {
-    private val runner = AcceleratorBenchmarkRunner(context)
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val gson = Gson()
 
@@ -285,13 +285,29 @@ class HardwareAcceleratorManager private constructor(
         val instance: HardwareAcceleratorManager
             get() = _instance ?: error("HardwareAcceleratorManager not initialized. Call init() in Application.onCreate().")
 
-        fun init(context: Context, scope: CoroutineScope): HardwareAcceleratorManager {
+        fun init(context: Context, scope: CoroutineScope): HardwareAcceleratorManager =
+            init(context, scope, AcceleratorBenchmarkRunner(context.applicationContext))
+
+        internal fun init(
+            context: Context,
+            scope: CoroutineScope,
+            runner: BenchmarkRunner,
+        ): HardwareAcceleratorManager {
             return _instance ?: synchronized(this) {
-                _instance ?: HardwareAcceleratorManager(context.applicationContext, scope).also {
+                _instance ?: HardwareAcceleratorManager(
+                    context = context.applicationContext,
+                    scope = scope,
+                    runner = runner,
+                ).also {
                     _instance = it
                     it.initialize()
                 }
             }
+        }
+
+        /** Resets the singleton — only for use in tests. */
+        internal fun reset() {
+            _instance = null
         }
     }
 }

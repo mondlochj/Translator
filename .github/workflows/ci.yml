@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**", "feature/**"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.9"
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      # Generate the benchmark model asset if it doesn't exist yet.
+      # This keeps CI green even before the first manual generation.
+      - name: Generate benchmark model asset
+        run: |
+          python3 -m pip install --quiet onnx>=1.14.0
+          python3 scripts/generate_benchmark_model.py
+        continue-on-error: true  # non-blocking — runner gracefully handles missing asset
+
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest
+
+      - name: Generate coverage report
+        run: gradle :app:jacocoTestDebugUnitTestReport
+        continue-on-error: true  # don't fail the build if coverage generation has issues
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/reports/tests/testDebugUnitTest/
+          retention-days: 14
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: app/build/reports/coverage/test/debug/
+          retention-days: 14
+
+      - name: Publish test summary
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Unit Test Results
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          reporter: java-junit
+          fail-on-error: false
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.9"
+
+      - name: Run lint
+        run: gradle :app:lintDebug
+
+      - name: Upload lint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 14

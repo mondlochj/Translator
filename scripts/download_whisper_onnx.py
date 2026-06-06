@@ -23,20 +23,27 @@ import os
 import sys
 import json
 import shutil
+import tempfile
 
 MODEL_ID = "openai/whisper-tiny"
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "app", "src", "main", "assets")
+TMP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "arosys_whisper_export")
 
 def check_deps():
     missing = []
-    for pkg in ("optimum", "transformers", "onnx", "onnxruntime"):
+    for pkg in ("transformers", "onnx", "onnxruntime"):
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
+    try:
+        from optimum.onnxruntime import ORTModelForSpeechSeq2Seq  # noqa: F401
+    except ImportError:
+        missing.append("optimum[onnxruntime]")
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
-        print(f"Install with: pip install {' '.join(missing)}")
+        print("Install with:")
+        print("  pip install optimum[onnxruntime] transformers onnx onnxruntime")
         sys.exit(1)
 
 def export_whisper():
@@ -46,49 +53,44 @@ def export_whisper():
     print(f"Downloading and exporting {MODEL_ID} to ONNX…")
     print("This will take a few minutes on first run.")
 
-    tmp_dir = "/tmp/whisper_onnx_export"
+    save_dir = os.path.join(TMP_DIR, "saved")
+    os.makedirs(save_dir, exist_ok=True)
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+
+    # Export to ONNX and save to save_dir in one step
     ort_model = ORTModelForSpeechSeq2Seq.from_pretrained(
         MODEL_ID,
         export=True,
-        cache_dir=tmp_dir,
+        cache_dir=TMP_DIR,
     )
-
-    os.makedirs(ASSETS_DIR, exist_ok=True)
-
-    # Export encoder
-    encoder_src = os.path.join(tmp_dir, "encoder_model.onnx")
-    encoder_dst = os.path.join(ASSETS_DIR, "whisper_encoder.onnx")
-    if not os.path.exists(encoder_src):
-        # Try alternate path from optimum export
-        encoder_src = os.path.join(tmp_dir, "model.onnx")
-    ort_model.encoder.save_pretrained(tmp_dir)
-    # optimum saves encoder and decoder separately
-    for candidate in ["encoder_model.onnx", "model_encoder.onnx"]:
-        candidate_path = os.path.join(tmp_dir, candidate)
-        if os.path.exists(candidate_path):
-            shutil.copy2(candidate_path, encoder_dst)
-            print(f"Encoder: {os.path.getsize(encoder_dst) // 1024 // 1024} MB → {encoder_dst}")
-            break
-
-    # Save full model directory and copy needed files
-    save_dir = os.path.join(tmp_dir, "saved")
     ort_model.save_pretrained(save_dir)
-    for fname, dst_name in [
-        ("encoder_model.onnx", "whisper_encoder.onnx"),
-        ("decoder_model.onnx", "whisper_decoder.onnx"),
+    print(f"  Saved ONNX files to {save_dir}")
+
+    # Copy encoder and decoder to assets; try both naming conventions optimum uses
+    for candidates, dst_name in [
+        (["encoder_model.onnx", "model_encoder.onnx"], "whisper_encoder.onnx"),
+        (["decoder_model.onnx", "model_decoder.onnx", "decoder_model_merged.onnx"], "whisper_decoder.onnx"),
     ]:
-        src = os.path.join(save_dir, fname)
-        dst = os.path.join(ASSETS_DIR, dst_name)
-        if os.path.exists(src):
-            shutil.copy2(src, dst)
-            size_mb = os.path.getsize(dst) // 1024 // 1024
-            print(f"  {dst_name}: {size_mb} MB")
+        copied = False
+        for candidate in candidates:
+            src = os.path.join(save_dir, candidate)
+            if os.path.exists(src):
+                dst = os.path.join(ASSETS_DIR, dst_name)
+                shutil.copy2(src, dst)
+                size_mb = os.path.getsize(dst) // 1024 // 1024
+                print(f"  {dst_name}: {size_mb} MB  (from {candidate})")
+                copied = True
+                break
+        if not copied:
+            # List what was actually produced so the user can report it
+            produced = [f for f in os.listdir(save_dir) if f.endswith(".onnx")]
+            print(f"  WARNING: could not find {dst_name}. Files in save_dir: {produced}")
 
     # Export vocabulary
-    processor = WhisperProcessor.from_pretrained(MODEL_ID)
+    processor = WhisperProcessor.from_pretrained(MODEL_ID, cache_dir=TMP_DIR)
     vocab = processor.tokenizer.get_vocab()
     vocab_path = os.path.join(ASSETS_DIR, "whisper_vocab.json")
-    with open(vocab_path, "w") as f:
+    with open(vocab_path, "w", encoding="utf-8") as f:
         json.dump(vocab, f)
     print(f"  whisper_vocab.json: {len(vocab)} tokens")
 

@@ -41,15 +41,19 @@ def check_deps():
     # optimum 2.x moved onnxruntime support to a separate package and changed
     # import paths.  Pin to the stable 1.x API.
     try:
-        import optimum as _opt
-        if Version(_opt.__version__) >= Version("2.0.0"):
-            print(f"optimum {_opt.__version__} is installed but these scripts require optimum 1.x.")
-            print("The onnxruntime export API changed in 2.x and is not yet supported here.")
-            print("Downgrade with:")
-            print('  pip install "optimum[onnxruntime]<2.0"')
-            sys.exit(1)
+        from importlib.metadata import version as pkg_version, PackageNotFoundError
+        try:
+            _opt_ver = pkg_version("optimum")
+            if Version(_opt_ver) >= Version("2.0.0"):
+                print(f"optimum {_opt_ver} is installed but these scripts require optimum 1.x.")
+                print("The onnxruntime export API changed in 2.x and is not yet supported here.")
+                print("Downgrade with:")
+                print('  pip install "optimum[onnxruntime]<2.0"')
+                sys.exit(1)
+        except PackageNotFoundError:
+            pass  # not installed — caught below
     except ImportError:
-        pass  # checked below
+        pass  # Python < 3.8 fallback; version check skipped
 
     missing = []
     for pkg in ("transformers", "sentencepiece", "onnx", "onnxruntime"):

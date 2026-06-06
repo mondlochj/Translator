@@ -1,0 +1,20 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Model files (large binaries — download separately)
+/models/
+app/src/main/assets/*.onnx
+app/src/main/assets/*.bin
+app/src/main/assets/*.gguf
+!app/src/main/assets/benchmark_model.onnx
+
+# Generated files
+app/src/main/assets/benchmark_model.onnx

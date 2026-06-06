@@ -1,6 +1,6 @@
 # Arosys Meeting Assistant — Project Tracking
 
-**Last Updated:** 2026-06-06
+**Last Updated:** 2026-06-06 (accelerator module added)
 **Target Device:** Samsung Galaxy Fold series
 **Primary Use Case:** Bilingual (Spanish/English) business meetings in Guatemala
 
@@ -52,16 +52,18 @@ An Android application that provides live bilingual assistance during Spanish-la
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| Language | Kotlin | |
-| UI | Jetpack Compose | |
-| Speech Recognition | Whisper.cpp | Streaming; local inference |
-| Translation | NLLB distilled | Abstraction layer wraps it |
+| Language | Kotlin 2.0 | |
+| UI | Jetpack Compose (BOM 2024.09) | |
+| Inference runtime | ONNX Runtime Mobile 1.19 | CPU + XNNPACK + NNAPI EPs |
+| Hardware acceleration | NNAPI → NPU/DSP/GPU auto-routed | Runtime-detected; benchmarked per model |
+| Speech Recognition | Whisper ONNX / whisper.cpp JNI | ONNX preferred for NNAPI acceleration |
+| Translation | NLLB-200-distilled-600M (ONNX) | Abstraction layer wraps it |
 | TTS | Piper TTS | Android native TTS as fallback |
-| LLM | Qwen3 4B | Pluggable; future: Gemma, Llama |
-| Database | SQLite / Room | |
-| Audio | Bluetooth headset API | Single-earbud operation |
+| LLM | Qwen3 4B (GGUF via llama.cpp) | Pluggable; future: ONNX Runtime GenAI |
+| Database | SQLite / Room 2.6 + FTS5 | |
+| Audio | Bluetooth SCO API | Single-earbud operation |
 
-All models must be quantized. No network dependencies for core features.
+All models must be quantized (ONNX INT8/FP16 or GGUF Q4). No network dependencies for core features.
 
 ---
 
@@ -73,7 +75,7 @@ These interfaces must remain stable. Models and providers are swapped behind the
 
 ```
 SpeechRecognizer
-  └── WhisperSpeechRecognizer (Phase 1)
+  └── WhisperOnnxSpeechRecognizer (Phase 1)
 
 TranslationEngine
   └── NLLBTranslationEngine (Phase 2)
@@ -89,25 +91,63 @@ StorageProvider
   └── RoomStorageProvider (Phase 1+)
 ```
 
+### Hardware Acceleration Architecture
+
+Every ONNX model goes through `HardwareAcceleratorManager` before its session is created:
+
+```
+App startup:
+  HardwareAcceleratorManager.initialize()
+    ├── DeviceInfo probe (SoC manufacturer, API level)
+    ├── Backend availability probe (CPU / XNNPACK / NNAPI)
+    └── Micro-benchmark (benchmark_model.onnx — MatMul[1,64]x[64,64] + ReLU)
+          → cached in SharedPreferences (7-day TTL)
+
+Per-model first load:
+  HardwareAcceleratorManager.benchmarkModel(modelName, modelBytes)
+    ├── CPU:    OrtSession.SessionOptions() + intra_op_num_threads=4
+    ├── XNNPACK: + addXnnpack()
+    └── NNAPI:   + addNnapi(flags=USE_FP16)
+          → NNAPI routes to NPU/DSP/GPU depending on SoC
+          → Galaxy Fold 4/5/6 (Snapdragon 8 Gen 1/2/3): routes to Hexagon NPU
+    → selectFastest(results) → cached backend written to prefs
+
+Session creation:
+  OrtSessionFactory.createWithFallback(modelBytes, preferredBackend)
+    └── falls back to CPU if preferred backend throws
+```
+
+Execution provider selection order (automatic, latency-driven):
+```
+NNAPI (NPU/DSP/GPU)  →  XNNPACK (CPU)  →  CPU (baseline)
+     fastest                                   slowest
+```
+
 ### Android Services Architecture
 
-Per the design note: speech and translation run as separate bound Android Services. This decouples them from the UI lifecycle and enables future offload to a local AI server (home network) while keeping the same UI and workflow.
+Speech and translation run as separate bound Android Services. This decouples them from the UI lifecycle and enables future offload to a local AI server (home network) while keeping the same UI and workflow.
 
 ```
 MainActivity (Compose UI)
-  ├── TranscriptionService (foreground service)
-  │     └── SpeechRecognizer impl
+  ├── TranscriptionService (foreground service, mic type)
+  │     └── SpeechRecognizer impl → OrtSessionFactory
   └── TranslationService (foreground service)
-        └── TranslationEngine impl
+        └── TranslationEngine impl → OrtSessionFactory
 ```
 
-### Folder Structure (target)
+### Folder Structure
 
 ```
 app/
   src/
     main/
       kotlin/com/arosys/meetingassistant/
+        accelerator/           # ★ NEW — hardware detection, benchmarking, session factory
+          OrtBackend.kt
+          BenchmarkResult.kt
+          AcceleratorBenchmarkRunner.kt
+          HardwareAcceleratorManager.kt
+          OrtSessionFactory.kt
         core/
           interfaces/          # SpeechRecognizer, TranslationEngine, TTSProvider, LLMProvider, StorageProvider
         services/
@@ -115,31 +155,30 @@ app/
           TranslationService.kt
           TTSService.kt
           LLMService.kt
-        models/                # Data classes: TranscriptEntry, MeetingRecord, ActionItem, etc.
         storage/
           RoomStorageProvider.kt
           MeetingDao.kt
           AppDatabase.kt
         ui/
           screens/
-            LiveMeetingScreen.kt
-            PostMeetingScreen.kt
-            KnowledgeBaseScreen.kt
-            SettingsScreen.kt
-          components/          # Reusable Compose components
+          components/
           theme/
         impl/
-          whisper/             # WhisperSpeechRecognizer
-          nllb/                # NLLBTranslationEngine
-          piper/               # PiperTTSProvider
-          qwen/                # Qwen3LLMProvider
+          whisper/
+          nllb/
+          piper/
+          qwen/
         utils/
-      res/
+      assets/
+        benchmark_model.onnx   # generated by scripts/generate_benchmark_model.py
     test/
-    androidTest/
   build.gradle.kts
 build.gradle.kts
 settings.gradle.kts
+gradle/
+  libs.versions.toml
+scripts/
+  generate_benchmark_model.py  # run once: pip install onnx && python3 scripts/generate_benchmark_model.py
 models/                        # Downloaded quantized model files (gitignored)
 ```
 
@@ -199,16 +238,17 @@ Microphone → AudioRecord buffer
 ```
 
 ### Deliverables Checklist
-- [ ] `SpeechRecognizer` interface defined
-- [ ] `StorageProvider` interface defined
-- [ ] `TranscriptEntry` data model
+- [x] Core interfaces defined (`SpeechRecognizer`, `TranslationEngine`, `TTSProvider`, `LLMProvider`, `StorageProvider`)
+- [x] Accelerator module: `OrtBackend`, `BenchmarkResult`, `AcceleratorBenchmarkRunner`, `HardwareAcceleratorManager`, `OrtSessionFactory`
+- [x] Project scaffold: `settings.gradle.kts`, `build.gradle.kts`, `app/build.gradle.kts`, `libs.versions.toml`, `AndroidManifest.xml`, `MeetingAssistantApp`
+- [x] Benchmark model generator: `scripts/generate_benchmark_model.py`
+- [x] Unit tests: `OrtBackendTest`, `AcceleratorBenchmarkRunnerTest`
+- [ ] Run `generate_benchmark_model.py` → commit `benchmark_model.onnx` asset
 - [ ] `TranscriptionService` (foreground, survives screen off)
-- [ ] `WhisperSpeechRecognizer` with JNI bridge to whisper.cpp
+- [ ] `WhisperOnnxSpeechRecognizer` (ONNX export of Whisper-tiny or Whisper-base)
+- [ ] ONNX model download / conversion script for Whisper
 - [ ] `RoomStorageProvider` + `MeetingDao` + `AppDatabase`
 - [ ] `LiveMeetingScreen` Compose UI
-- [ ] JNI/CMake build config for whisper.cpp
-- [ ] `models/` download script or README
-- [ ] Unit tests: `WhisperSpeechRecognizerTest`, `RoomStorageProviderTest`
 - [ ] Integration test: full audio → transcript → DB round trip
 - [ ] Build instructions documented
 
@@ -597,10 +637,13 @@ Decisions that affect architecture, technology choices, or approach. Record here
 | Date | Decision | Rationale | Alternatives Considered |
 |------|----------|-----------|------------------------|
 | 2026-06-06 | Speech + translation as separate Android Services | Decouples from UI lifecycle; enables future offload to home AI server | Single in-process pipeline (rejected: too tightly coupled) |
-| 2026-06-06 | Whisper.cpp for speech recognition | Proven streaming performance, JNI-friendly, offline | Android Speech Recognition API (rejected: requires internet), Vosk (future fallback candidate) |
-| 2026-06-06 | NLLB distilled for translation | Strong Spanish↔English quality, distilled fits in device RAM | MarianMT (smaller but lower quality), cloud APIs (rejected: offline requirement) |
+| 2026-06-06 | ONNX Runtime Mobile as inference runtime for all non-LLM models | Enables NNAPI acceleration (NPU/DSP/GPU) across Whisper and NLLB; single unified inference API | TFLite (less flexible operator support), cloud APIs (rejected: offline requirement) |
+| 2026-06-06 | Runtime hardware detection + per-model benchmarking | Different models benefit from different backends; NLLB may be faster on NNAPI while Whisper encoder is faster on XNNPACK | Static configuration (rejected: too device-specific) |
+| 2026-06-06 | 7-day benchmark cache in SharedPreferences | Avoids re-benchmarking on every app start; 7 days balances freshness vs overhead | No cache (too slow), Room (overkill for ~10 KB of JSON) |
+| 2026-06-06 | Whisper ONNX preferred over whisper.cpp | ONNX allows NNAPI acceleration of encoder; whisper.cpp kept as fallback | whisper.cpp only (rejected: loses NPU path) |
+| 2026-06-06 | NLLB distilled 600M for translation | Strong Spanish↔English quality, distilled fits in device RAM, ONNX-exportable | MarianMT (smaller but lower quality), cloud APIs (rejected: offline requirement) |
 | 2026-06-06 | Piper TTS for earbud output | Natural voice, fast inference, fully offline | eSpeak (rejected: robotic), cloud TTS (rejected: latency + offline) |
-| 2026-06-06 | Qwen3 4B for LLM layer | Strong multilingual reasoning, 4B fits in RAM with quantization | Gemma 2B (less capable), Llama 3.1 8B (too large for base config) |
+| 2026-06-06 | Qwen3 4B (GGUF/llama.cpp) for LLM layer | Strong multilingual reasoning, 4B fits in RAM with Q4 quantization; llama.cpp well-supported on ARM64 | ONNX Runtime GenAI (future migration path when Qwen3 ONNX is stable) |
 | 2026-06-06 | Phase 3 Mode C uses keyword/pattern matching, not LLM | LLM not yet integrated in Phase 3; avoids latency risk | LLM classification (deferred to Phase 5) |
 
 ---
@@ -646,8 +689,10 @@ Running record of actual measurements per phase. Update after each phase is comp
 | 2 | Bluetooth SCO audio routing latency on Android can be 200–400ms | Medium | 3 | Open | Test on actual BT earpiece early |
 | 3 | NLLB may produce lower quality on partial/incomplete sentences | Medium | 2 | Open | May need sentence buffering heuristic |
 | 4 | Qwen3 4B cold-start time on first inference | Medium | 4 | Open | Keep model warm in background service |
-| 5 | whisper.cpp JNI build complexity with CMake | Low | 1 | Open | Plan extra build config time |
+| 5 | Whisper ONNX op coverage — some Whisper ops may not be supported by NNAPI EP | Medium | 1 | Open | ORT falls back to CPU for unsupported ops; benchmark will expose if NNAPI is net-positive |
 | 6 | Mode C priority classifier precision on business Spanish | Medium | 3 | Open | Build test corpus of Guatemala business speech |
+| 7 | Benchmark model asset must be generated before first build | Low | 0 | Open | Run `python3 scripts/generate_benchmark_model.py`; CI should generate automatically |
+| 8 | NNAPI may produce different numerical results than CPU (FP16 rounding) | Low | 2 | Open | Acceptable for translation; test output quality on NNAPI vs CPU |
 
 ---
 

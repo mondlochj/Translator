@@ -45,6 +45,18 @@ def check_deps():
         print("Install with:")
         print("  pip install optimum[onnxruntime] transformers onnx onnxruntime")
         sys.exit(1)
+    # torch ≥ 2.6 required — earlier versions have CVE-2025-32434 and are blocked
+    # by transformers when loading pytorch_model.bin checkpoints
+    try:
+        import torch
+        from packaging.version import Version
+        if Version(torch.__version__.split("+")[0]) < Version("2.6.0"):
+            print(f"PyTorch {torch.__version__} is too old (need ≥ 2.6.0).")
+            print("Upgrade with:  pip install --upgrade torch")
+            sys.exit(1)
+    except ImportError:
+        print("torch not found. Install with:  pip install torch")
+        sys.exit(1)
 
 def export_whisper():
     from optimum.onnxruntime import ORTModelForSpeechSeq2Seq

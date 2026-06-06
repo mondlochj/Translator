@@ -23,20 +23,27 @@ import os
 import sys
 import json
 import shutil
+import tempfile
 
 MODEL_ID = "openai/whisper-tiny"
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "..", "app", "src", "main", "assets")
+TMP_DIR = os.path.join(os.path.expanduser("~"), ".cache", "arosys_whisper_export")
 
 def check_deps():
     missing = []
-    for pkg in ("optimum", "transformers", "onnx", "onnxruntime"):
+    for pkg in ("transformers", "onnx", "onnxruntime"):
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
+    try:
+        from optimum.onnxruntime import ORTModelForSpeechSeq2Seq  # noqa: F401
+    except ImportError:
+        missing.append("optimum[onnxruntime]")
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
-        print(f"Install with: pip install {' '.join(missing)}")
+        print("Install with:")
+        print("  pip install optimum[onnxruntime] transformers onnx onnxruntime")
         sys.exit(1)
 
 def export_whisper():
@@ -46,7 +53,8 @@ def export_whisper():
     print(f"Downloading and exporting {MODEL_ID} to ONNX…")
     print("This will take a few minutes on first run.")
 
-    tmp_dir = "/tmp/whisper_onnx_export"
+    tmp_dir = TMP_DIR
+    os.makedirs(tmp_dir, exist_ok=True)
     ort_model = ORTModelForSpeechSeq2Seq.from_pretrained(
         MODEL_ID,
         export=True,

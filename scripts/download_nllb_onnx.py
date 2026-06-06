@@ -32,19 +32,24 @@ import sys
 
 MODEL_ID    = "facebook/nllb-200-distilled-600M"
 ASSETS_DIR  = os.path.join(os.path.dirname(__file__), "..", "app", "src", "main", "assets")
-TMP_DIR     = "/tmp/nllb_onnx_export"
+TMP_DIR     = os.path.join(os.path.expanduser("~"), ".cache", "arosys_nllb_export")
 
 
 def check_deps():
     missing = []
-    for pkg in ("optimum", "transformers", "sentencepiece", "onnx", "onnxruntime"):
+    for pkg in ("transformers", "sentencepiece", "onnx", "onnxruntime"):
         try:
             __import__(pkg)
         except ImportError:
             missing.append(pkg)
+    try:
+        from optimum.onnxruntime import ORTModelForSeq2SeqLM  # noqa: F401
+    except ImportError:
+        missing.append("optimum[onnxruntime]")
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
-        print(f"Install with: pip install {' '.join(missing)}")
+        print("Install with:")
+        print("  pip install optimum[onnxruntime] transformers sentencepiece onnx onnxruntime")
         sys.exit(1)
 
 

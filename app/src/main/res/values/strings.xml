@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Arosys Meeting</string>
+    <string name="btn_start">Start</string>
+    <string name="btn_stop">Stop</string>
+    <string name="btn_save">Save</string>
+    <string name="label_transcript">Transcript</string>
+    <string name="status_idle">Ready</string>
+    <string name="status_starting">Starting…</string>
+    <string name="status_recording">Recording</string>
+    <string name="status_stopping">Stopping…</string>
+    <string name="model_loading">Loading model…</string>
+    <string name="model_ready">Whisper ready</string>
+    <string name="model_not_found">Model not found — run download_whisper_onnx.py</string>
+    <string name="transcript_empty">Transcript will appear here</string>
+    <string name="notification_channel_name">Transcription</string>
+    <string name="notification_title">Transcribing meeting</string>
+    <string name="notification_text">Tap to return to meeting</string>
+    <string name="permission_mic_rationale">Microphone access is required to transcribe speech.</string>
+    <string name="saved">Transcript saved</string>
+</resources>

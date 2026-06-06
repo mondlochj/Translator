@@ -256,7 +256,7 @@ Test results are published as a GitHub check via `dorny/test-reporter`.
 
 | Phase | Name | Status | Started | Completed | Notes |
 |-------|------|--------|---------|-----------|-------|
-| 1 | Live Spanish Transcription | **Not Started** | — | — | |
+| 1 | Live Spanish Transcription | **In Progress** | 2026-06-06 | — | Impl complete; needs model files |
 | 2 | Live English Translation | **Not Started** | — | — | Depends on Phase 1 |
 | 3 | Earbud Assistance Mode | **Not Started** | — | — | Depends on Phase 2 |
 | 4 | AI Meeting Intelligence | **Not Started** | — | — | Depends on Phase 3 |
@@ -313,14 +313,21 @@ Microphone → AudioRecord buffer
 - [x] Unit tests: `OrtBackendTest`, `AcceleratorBenchmarkRunnerTest`, `HardwareAcceleratorManagerTest` (Robolectric)
 - [x] Test infrastructure: `MainDispatcherRule`, all five fakes, `TranscriptFixtures`, `AudioFixtures`
 - [x] CI pipeline: `.github/workflows/ci.yml` (unit tests + lint on every push)
-- [ ] Run `generate_benchmark_model.py` → commit `benchmark_model.onnx` asset
-- [ ] `TranscriptionService` (foreground, survives screen off)
-- [ ] `WhisperOnnxSpeechRecognizer` (ONNX export of Whisper-tiny or Whisper-base)
-- [ ] ONNX model download / conversion script for Whisper
-- [ ] `RoomStorageProvider` + `MeetingDao` + `AppDatabase`
-- [ ] `LiveMeetingScreen` Compose UI
-- [ ] Integration test: full audio → transcript → DB round trip
-- [ ] Build instructions documented
+- [x] `RoomStorageProvider` + `MeetingDao` + `TranscriptDao` + `AppDatabase` (Room + cascade FK)
+- [x] `MicrophoneAudioSource` (AudioRecord, 16 kHz mono, PCM → float32)
+- [x] `SimpleFft` (Cooley-Tukey radix-2, pure Kotlin)
+- [x] `MelSpectrogramProcessor` (Whisper-compatible: n_fft=400, 80 mels, normalised)
+- [x] `AudioChunker` (energy VAD, silence-boundary segmentation, pre/post-speech padding)
+- [x] `WhisperConfig`, `WhisperTokenizer`, `WhisperOnnxSpeechRecognizer` (encoder + greedy decoder)
+- [x] `TranscriptionService` (foreground, mic type, auto-saves entries to Room)
+- [x] `LiveMeetingViewModel` (binds service, exposes UiState, mic permission flow)
+- [x] `LiveMeetingScreen` (status bar, scrolling transcript, start/stop controls)
+- [x] `TranscriptItem` component (timestamp + Spanish + English preview)
+- [x] `MelSpectrogramProcessorTest`, `AudioChunkerTest`, `TranscriptionServiceTest`, `RoomStorageProviderTest`
+- [x] `scripts/download_whisper_onnx.py` (optimum ONNX export + vocab + benchmark model)
+- [ ] **Run `scripts/download_whisper_onnx.py`** — places model files in `assets/`; required for runtime
+- [ ] First device test and latency benchmark on Galaxy Fold
+- [ ] Build instructions (`docs/BUILD.md` or README)
 
 ### Success Criteria
 User places phone on table → live Spanish transcription appears on screen with < 2s latency.

@@ -121,8 +121,9 @@ class TranscriptionService : Service() {
                 val meetingId = storage.createMeeting(meetingTitle)
                 (application as MeetingAssistantApp).meetingSession.setMeetingId(meetingId)
 
-                // Start TranslationService alongside transcription
+                // Start translation and TTS services alongside transcription
                 startService(Intent(this@TranscriptionService, TranslationService::class.java))
+                startService(Intent(this@TranscriptionService, TTSService::class.java))
 
                 val micSource = MicrophoneAudioSource().also { mic = it }
                 micSource.startRecording()
@@ -157,6 +158,8 @@ class TranscriptionService : Service() {
             _uiState.value.currentMeetingId?.let { id ->
                 storage.finalizeMeeting(id)
             }
+            // Clear meeting ID — TTSService watches this and stops itself
+            (application as MeetingAssistantApp).meetingSession.setMeetingId(null)
             if (wakeLock.isHeld) wakeLock.release()
             _uiState.value = _uiState.value.copy(sessionState = SessionState.IDLE)
             stopForeground(STOP_FOREGROUND_REMOVE)

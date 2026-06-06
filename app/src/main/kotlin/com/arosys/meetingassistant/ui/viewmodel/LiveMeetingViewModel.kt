@@ -9,8 +9,10 @@ import android.os.IBinder
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.arosys.meetingassistant.MeetingAssistantApp
 import com.arosys.meetingassistant.accelerator.AcceleratorState
 import com.arosys.meetingassistant.accelerator.HardwareAcceleratorManager
+import com.arosys.meetingassistant.core.interfaces.AudioMode
 import com.arosys.meetingassistant.core.interfaces.TranscriptEntry
 import com.arosys.meetingassistant.services.SessionState
 import com.arosys.meetingassistant.services.TranscriptionService
@@ -19,7 +21,6 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 private const val TAG = "LiveMeetingViewModel"
@@ -33,31 +34,39 @@ data class LiveMeetingUiState(
     val currentMeetingId: Long? = null,
     val acceleratorStatus: String = "",
     val micPermissionGranted: Boolean = false,
+    val audioMode: AudioMode = AudioMode.ALL_SPEECH,
+    val bluetoothConnected: Boolean = false,
 )
 
 class LiveMeetingViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _permissionGranted = MutableStateFlow(false)
+    private val app get() = getApplication<MeetingAssistantApp>()
 
-    private var transcriptionService: TranscriptionService? = null
+    private val _permissionGranted = MutableStateFlow(false)
     private val _serviceState = MutableStateFlow(
         com.arosys.meetingassistant.services.TranscriptionState()
     )
+
+    private var transcriptionService: TranscriptionService? = null
 
     val uiState: StateFlow<LiveMeetingUiState> = combine(
         _serviceState,
         _permissionGranted,
         HardwareAcceleratorManager.instance.state,
-    ) { svc, perm, accel ->
+        app.meetingSession.bluetoothConnected,
+        app.userPreferences.audioMode,
+    ) { svc, perm, accel, btConnected, mode ->
         LiveMeetingUiState(
-            sessionState = svc.sessionState,
-            modelStatus = svc.modelStatus,
-            backendLabel = svc.backendLabel,
-            transcriptEntries = svc.transcriptEntries,
-            partialText = svc.partialText,
-            currentMeetingId = svc.currentMeetingId,
-            acceleratorStatus = accel.toStatusLabel(),
+            sessionState         = svc.sessionState,
+            modelStatus          = svc.modelStatus,
+            backendLabel         = svc.backendLabel,
+            transcriptEntries    = svc.transcriptEntries,
+            partialText          = svc.partialText,
+            currentMeetingId     = svc.currentMeetingId,
+            acceleratorStatus    = accel.toStatusLabel(),
             micPermissionGranted = perm,
+            audioMode            = mode,
+            bluetoothConnected   = btConnected,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -70,9 +79,7 @@ class LiveMeetingViewModel(application: Application) : AndroidViewModel(applicat
             val binder = service as? TranscriptionService.LocalBinder ?: return
             transcriptionService = binder.service
             viewModelScope.launch {
-                binder.service.uiState.collect { state ->
-                    _serviceState.value = state
-                }
+                binder.service.uiState.collect { _serviceState.value = it }
             }
             Log.d(TAG, "TranscriptionService connected")
         }
@@ -104,27 +111,29 @@ class LiveMeetingViewModel(application: Application) : AndroidViewModel(applicat
         transcriptionService?.stopSession()
     }
 
-    // -------------------------------------------------------------------------
-    // Private
+    fun setAudioMode(mode: AudioMode) {
+        viewModelScope.launch { app.userPreferences.setAudioMode(mode) }
+    }
+
+    fun setBluetoothEnabled(enabled: Boolean) {
+        viewModelScope.launch { app.userPreferences.setBluetoothEnabled(enabled) }
+    }
+
     // -------------------------------------------------------------------------
 
     private fun bindToService() {
         val intent = Intent(getApplication(), TranscriptionService::class.java)
         getApplication<Application>().bindService(
-            intent, serviceConnection, Context.BIND_AUTO_CREATE
+            intent, serviceConnection, Context.BIND_AUTO_CREATE,
         )
     }
 
     override fun onCleared() {
         super.onCleared()
-        try {
-            getApplication<Application>().unbindService(serviceConnection)
-        } catch (e: Exception) { /* not bound */ }
+        try { getApplication<Application>().unbindService(serviceConnection) }
+        catch (_: Exception) { }
     }
 
-    private fun AcceleratorState.toStatusLabel(): String {
-        val backend = defaultBackend.displayName
-        val device = deviceInfo?.socModel ?: "Unknown"
-        return "$backend · $device"
-    }
+    private fun AcceleratorState.toStatusLabel(): String =
+        "${defaultBackend.displayName} · ${deviceInfo?.socModel ?: "Unknown"}"
 }

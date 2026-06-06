@@ -18,19 +18,23 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,7 +44,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.arosys.meetingassistant.core.interfaces.AudioMode
 import com.arosys.meetingassistant.services.SessionState
+import com.arosys.meetingassistant.ui.components.AudioModeChip
 import com.arosys.meetingassistant.ui.components.TranscriptItem
 import com.arosys.meetingassistant.ui.theme.PartialTextColor
 import com.arosys.meetingassistant.ui.theme.RecordingRed
@@ -49,21 +55,20 @@ import com.arosys.meetingassistant.ui.viewmodel.LiveMeetingViewModel
 @Composable
 fun LiveMeetingScreen(
     onRequestMicPermission: () -> Unit,
+    onRequestBluetoothPermission: () -> Unit = {},
     viewModel: LiveMeetingViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
+    var showSettings by remember { mutableStateOf(false) }
 
-    // Auto-scroll to bottom when new entries arrive
     LaunchedEffect(state.transcriptEntries.size) {
         if (state.transcriptEntries.isNotEmpty()) {
             listState.animateScrollToItem(state.transcriptEntries.size - 1)
         }
     }
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-    ) { padding ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -73,20 +78,19 @@ fun LiveMeetingScreen(
             // Status bar
             // ----------------------------------------------------------------
             StatusBar(
-                sessionState = state.sessionState,
-                modelStatus = state.modelStatus,
-                acceleratorStatus = state.acceleratorStatus,
-                backendLabel = state.backendLabel,
+                sessionState       = state.sessionState,
+                modelStatus        = state.modelStatus,
+                backendLabel       = state.backendLabel,
+                acceleratorStatus  = state.acceleratorStatus,
+                audioMode          = state.audioMode,
+                bluetoothConnected = state.bluetoothConnected,
+                onSettingsClick    = { showSettings = true },
             )
 
             // ----------------------------------------------------------------
             // Transcript
             // ----------------------------------------------------------------
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (state.transcriptEntries.isEmpty() && state.partialText.isEmpty()) {
                     Text(
                         text = if (state.sessionState == SessionState.IDLE)
@@ -98,15 +102,10 @@ fun LiveMeetingScreen(
                         modifier = Modifier.align(Alignment.Center),
                     )
                 }
-
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                ) {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(state.transcriptEntries, key = { it.id }) { entry ->
                         TranscriptItem(entry)
                     }
-                    // Live partial text at the bottom
                     if (state.partialText.isNotEmpty()) {
                         item {
                             Text(
@@ -125,7 +124,7 @@ fun LiveMeetingScreen(
             // Controls
             // ----------------------------------------------------------------
             ControlBar(
-                sessionState = state.sessionState,
+                sessionState         = state.sessionState,
                 micPermissionGranted = state.micPermissionGranted,
                 onStart = {
                     if (!state.micPermissionGranted) onRequestMicPermission()
@@ -135,28 +134,42 @@ fun LiveMeetingScreen(
             )
         }
     }
+
+    // Settings bottom sheet
+    if (showSettings) {
+        SettingsBottomSheet(
+            currentMode       = state.audioMode,
+            bluetoothEnabled  = true,
+            onModeChange      = { viewModel.setAudioMode(it) },
+            onBluetoothToggle = { viewModel.setBluetoothEnabled(it) },
+            onDismiss         = { showSettings = false },
+        )
+    }
 }
 
 @Composable
 private fun StatusBar(
     sessionState: SessionState,
     modelStatus: String,
-    acceleratorStatus: String,
     backendLabel: String,
+    acceleratorStatus: String,
+    audioMode: AudioMode,
+    bluetoothConnected: Boolean,
+    onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Recording pulse indicator
         val indicatorColor = when (sessionState) {
             SessionState.RECORDING -> RecordingRed
-            SessionState.STARTING -> Color(0xFFFF9800)
-            else -> Color(0xFF555555)
+            SessionState.STARTING  -> Color(0xFFFF9800)
+            else                   -> Color(0xFF555555)
         }
         Box(
             modifier = Modifier
@@ -165,7 +178,7 @@ private fun StatusBar(
                 .background(indicatorColor)
         )
         Spacer(Modifier.width(8.dp))
-        Column {
+        Column(Modifier.weight(1f)) {
             Text(
                 text = sessionState.name,
                 style = MaterialTheme.typography.labelMedium,
@@ -179,14 +192,33 @@ private fun StatusBar(
                 fontSize = 10.sp,
             )
         }
-        Spacer(Modifier.weight(1f))
+
+        // Mode + BT chip
+        AudioModeChip(
+            mode = audioMode,
+            bluetoothConnected = bluetoothConnected,
+            onClick = onSettingsClick,
+        )
+
+        // Accelerator status
         if (acceleratorStatus.isNotEmpty()) {
+            Spacer(Modifier.width(4.dp))
             Text(
                 text = acceleratorStatus,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
+            )
+        }
+
+        // Settings icon
+        IconButton(onClick = onSettingsClick, modifier = Modifier.size(36.dp)) {
+            Icon(
+                Icons.Filled.Settings,
+                contentDescription = "Settings",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
             )
         }
     }

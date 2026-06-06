@@ -108,11 +108,17 @@ class TranslationService : Service() {
                     currentText = pending.spanishText.take(40),
                 )
 
-                var partialText = ""
                 engine.translateStream(pending.spanishText).collect { result ->
-                    partialText = result.translatedText
                     if (result.isFinal) {
                         storage.updateTranslation(pending.entryId, result.translatedText)
+                        session.notifyTranslationCompleted(
+                            CompletedTranslation(
+                                entryId    = pending.entryId,
+                                spanishText = pending.spanishText,
+                                englishText = result.translatedText,
+                                meetingId  = pending.meetingId,
+                            )
+                        )
                         Log.d(TAG, "Translated: \"${pending.spanishText.take(30)}\" → \"${result.translatedText.take(30)}\"")
                     }
                 }

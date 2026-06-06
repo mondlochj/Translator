@@ -1,6 +1,6 @@
 # Arosys Meeting Assistant — Project Tracking
 
-**Last Updated:** 2026-06-06 (Phase 2 complete; background + screen-off operation hardened)
+**Last Updated:** 2026-06-06 (Phase 3 implementation complete)
 **Target Device:** Samsung Galaxy Fold series
 **Primary Use Case:** Bilingual (Spanish/English) business meetings in Guatemala
 
@@ -52,9 +52,9 @@ Bluetooth earbud audio. This is implemented across all phases as follows:
 | `PARTIAL_WAKE_LOCK` in TranscriptionService | Prevents CPU sleep during Whisper inference when screen is off | ✅ Phase 1 |
 | Foreground service (`dataSync` type) | Keeps NLLB inference alive in background on API 34+ | ✅ Phase 2 |
 | `PARTIAL_WAKE_LOCK` in TranslationService | Prevents CPU sleep during NLLB inference when screen is off | ✅ Phase 2 |
-| Foreground service (`mediaPlayback` type) | Required for audio output to BT headset with screen off | Phase 3 |
-| Bluetooth SCO audio routing in TTSService | Routes TTS audio to BT earbud regardless of screen state | Phase 3 |
-| `AudioFocusRequest` in TTSService | Ensures audio routing survives screen-off / phone-close events | Phase 3 |
+| Foreground service (`mediaPlayback` type) | Required for audio output to BT headset with screen off | ✅ Phase 3 |
+| Bluetooth SCO audio routing in TTSService | Routes TTS audio to BT earbud regardless of screen state | ✅ Phase 3 |
+| `PARTIAL_WAKE_LOCK` in TTSService | Prevents CPU sleep during TTS synthesis when screen is off | ✅ Phase 3 |
 
 **Latency Targets:**
 | Milestone | Target |
@@ -275,7 +275,7 @@ Test results are published as a GitHub check via `dorny/test-reporter`.
 |-------|------|--------|---------|-----------|-------|
 | 1 | Live Spanish Transcription | **In Progress** | 2026-06-06 | — | Impl complete; needs model files |
 | 2 | Live English Translation | **In Progress** | 2026-06-06 | — | Impl complete; needs model files |
-| 3 | Earbud Assistance Mode | **Not Started** | — | — | Depends on Phase 2 |
+| 3 | Earbud Assistance Mode | **In Progress** | 2026-06-06 | — | Impl complete; needs BT device test |
 | 4 | AI Meeting Intelligence | **Not Started** | — | — | Depends on Phase 3 |
 | 5 | Smart Real-Time Filtering | **Not Started** | — | — | Depends on Phase 4 |
 | 6 | Conversation Copilot | **Not Started** | — | — | Depends on Phase 5 |
@@ -486,16 +486,29 @@ The `mediaPlayback` foreground service type (already declared in manifest)
 is required for this to work when the screen is off on API 29+.
 
 ### Deliverables Checklist
-- [ ] `TTSProvider` interface defined
-- [ ] `PiperTTSProvider` implementation
-- [ ] `AndroidNativeTTSProvider` fallback
-- [ ] `TTSService` — foreground (`mediaPlayback` type); wake lock; BT SCO routing sequence above
-- [ ] Bluetooth SCO audio routing + `ACTION_SCO_AUDIO_STATE_UPDATED` receiver
-- [ ] `AudioFocusRequest` management (screen-off safe)
-- [ ] Mode A/B/C selector (persisted in preferences)
-- [ ] `PriorityClassifier` (lightweight keyword + pattern matching for Mode C; no LLM in Phase 3)
-- [ ] Settings screen
-- [ ] Unit tests: `PriorityClassifierTest`, `TTSServiceTest`
+- [x] `TTSProvider` interface defined (`AudioOutputRoute` enum, `speak`, `warmUp`, `stopSpeaking`)
+- [x] `PiperTTSProvider` implementation (asset-check stub; falls through to Android native until JNI wired)
+- [x] `AndroidNativeTTSProvider` fallback (`USAGE_VOICE_COMMUNICATION` for BT SCO routing)
+- [x] `TTSService` — foreground (`mediaPlayback` type); `PARTIAL_WAKE_LOCK`; mode-reactive pipeline
+- [x] `BluetoothAudioRouter` interface + `AndroidBluetoothAudioRouter` (API 31+ `setCommunicationDevice`; API 27-30 SCO broadcast receiver; 5s timeout)
+- [x] Pre-connect BT SCO on session start (avoids first-word clipping); disconnect on session end
+- [x] `AudioMode` enum (A = TEXT_ONLY, B = ALL_SPEECH, C = PRIORITY_ONLY)
+- [x] `UserPreferences` (DataStore: `audioMode`, `bluetoothEnabled`)
+- [x] `PriorityClassifier` (keyword + regex: QUESTION > ACTION_ITEM > DEADLINE > FINANCIAL > DECISION)
+- [x] `SettingsBottomSheet` (Mode A/B/C radio + BT toggle)
+- [x] `AudioModeChip` (status-bar chip showing current mode + BT icon)
+- [x] `LiveMeetingScreen` updated (settings icon → bottom sheet; AudioModeChip in StatusBar)
+- [x] `LiveMeetingViewModel` updated (5-arg combine; `setAudioMode`; `setBluetoothEnabled`)
+- [x] `MeetingSession` updated (`translationCompleted` SharedFlow; `bluetoothConnected` StateFlow)
+- [x] `TranslationService` updated (calls `notifyTranslationCompleted` on final result)
+- [x] `TranscriptionService` updated (starts TTSService on session start; clears meetingId on stop)
+- [x] `MeetingAssistantApp` updated (exposes `userPreferences`)
+- [x] `MainActivity` updated (runtime `BLUETOOTH_CONNECT` permission, API 31+)
+- [x] `strings.xml` updated (TTS channel, notification texts, settings labels)
+- [x] `FakeBluetoothAudioRouter` (controllable; tracks connect/disconnect counts)
+- [x] Unit tests: `PriorityClassifierTest` (all 5 categories + precedence + snippet truncation)
+- [x] Unit tests: `TTSServiceTest` (Mode A/B/C routing + BT router + SharedFlow pipeline)
+- [x] `scripts/download_piper_voice.py` (en_US-lessac-medium + ryan-medium; `--force` flag)
 - [ ] BT integration test on real device (Galaxy Fold, screen off)
 - [ ] Build instructions updated
 

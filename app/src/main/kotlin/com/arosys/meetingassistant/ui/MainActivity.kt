@@ -1,6 +1,7 @@
 package com.arosys.meetingassistant.ui
 
 import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -21,6 +22,11 @@ class MainActivity : ComponentActivity() {
         if (granted) meetingViewModel.startMeeting()
     }
 
+    // API 31+ requires BLUETOOTH_CONNECT at runtime to discover SCO devices.
+    private val bluetoothPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* BT permission result — TTSService will retry connect on next session start */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -31,14 +37,23 @@ class MainActivity : ComponentActivity() {
                     onRequestMicPermission = {
                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     },
+                    onRequestBluetoothPermission = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                        }
+                    },
                     viewModel = meetingViewModel,
                 )
             }
         }
 
-        // Report current permission state on startup
-        val alreadyGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-            android.content.pm.PackageManager.PERMISSION_GRANTED
-        // ViewModel isn't ready in onCreate — deferred via LaunchedEffect or first composition
+        // Request BLUETOOTH_CONNECT proactively so TTSService can use SCO immediately.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val btGranted = checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!btGranted) {
+                bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
     }
 }

@@ -63,8 +63,9 @@ def check_deps():
             missing.append(pkg)
     try:
         from optimum.onnxruntime import ORTModelForSeq2SeqLM  # noqa: F401
-    except ImportError:
+    except ImportError as e:
         missing.append('"optimum[onnxruntime]<2.0"')
+        print(f"  (import error detail: {e})")
     if missing:
         print(f"Missing packages: {', '.join(missing)}")
         print("Install with:")

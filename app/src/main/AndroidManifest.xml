@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Required for TranslationService and LLMService foreground type on API 34+ -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Required for TTSService foreground type (audio output to BT headset in background) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- Keeps CPU alive when screen is off so transcription/inference continues uninterrupted -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- NNAPI hardware acceleration feature declaration -->
@@ -38,16 +43,21 @@
             android:foregroundServiceType="microphone"
             android:exported="false" />
 
+        <!-- dataSync type satisfies API 34 requirement for inference services with no mic/camera/location -->
         <service
             android:name=".services.TranslationService"
+            android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- mediaPlayback type required for audio output to Bluetooth headset when screen is off -->
         <service
             android:name=".services.TTSService"
+            android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
 
         <service
             android:name=".services.LLMService"
+            android:foregroundServiceType="dataSync"
             android:exported="false" />
 
     </application>

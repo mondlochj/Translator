@@ -1,6 +1,6 @@
 # Arosys Meeting Assistant — Project Tracking
 
-**Last Updated:** 2026-06-06 (Phase 2 — live English translation implemented)
+**Last Updated:** 2026-06-06 (Phase 2 complete; background + screen-off operation hardened)
 **Target Device:** Samsung Galaxy Fold series
 **Primary Use Case:** Bilingual (Spanish/English) business meetings in Guatemala
 
@@ -34,10 +34,27 @@ An Android application that provides live bilingual assistance during Spanish-la
 - Speed over perfect translation
 - Meaning over literal translation
 - Keep user engaged in conversation, not staring at screen
+- **Works completely in the background** — phone closed/folded, screen off, in pocket
 - Local-first / offline-capable
 - Modular — models can be swapped without business logic changes
 - Battery-conscious
 - Separate Android Services for speech and translation engines (enables future offload to home AI server)
+
+**Background / Screen-Off Operation (cross-cutting requirement):**
+
+The app MUST work with the screen completely off and the Galaxy Fold closed. The user
+should be able to pocket the phone and still receive transcription + translation +
+Bluetooth earbud audio. This is implemented across all phases as follows:
+
+| Mechanism | Purpose | Status |
+|-----------|---------|--------|
+| Foreground service (`microphone` type) | Keeps mic alive in background on all Android versions | ✅ Phase 1 |
+| `PARTIAL_WAKE_LOCK` in TranscriptionService | Prevents CPU sleep during Whisper inference when screen is off | ✅ Phase 1 |
+| Foreground service (`dataSync` type) | Keeps NLLB inference alive in background on API 34+ | ✅ Phase 2 |
+| `PARTIAL_WAKE_LOCK` in TranslationService | Prevents CPU sleep during NLLB inference when screen is off | ✅ Phase 2 |
+| Foreground service (`mediaPlayback` type) | Required for audio output to BT headset with screen off | Phase 3 |
+| Bluetooth SCO audio routing in TTSService | Routes TTS audio to BT earbud regardless of screen state | Phase 3 |
+| `AudioFocusRequest` in TTSService | Ensures audio routing survives screen-off / phone-close events | Phase 3 |
 
 **Latency Targets:**
 | Milestone | Target |
@@ -448,17 +465,38 @@ TranslationService → translated sentence
     → fallback → AndroidNativeTTSProvider
 ```
 
+### Bluetooth Audio Architecture (Screen-Off)
+
+When the phone is folded/pocketed with the screen off, TTS audio must still
+reach the earbud. The required Android sequence is:
+
+```
+TTSService.speak(text)
+  1. AudioManager.requestAudioFocus(focusRequest)    // claim audio routing
+  2. AudioManager.startBluetoothSco()                // initiate SCO connection
+  3. Await ACTION_SCO_AUDIO_STATE_UPDATED broadcast   // SCO_AUDIO_STATE_CONNECTED
+  4. AudioManager.setMode(MODE_IN_COMMUNICATION)     // route to BT headset
+  5. PiperTTSProvider.synthesize(text) → PCM → AudioTrack (STREAM_VOICE_CALL)
+  6. AudioManager.stopBluetoothSco()                 // release SCO
+  7. AudioManager.abandonAudioFocus(focusRequest)
+```
+
+`AudioTrack` with `STREAM_VOICE_CALL` routes through the SCO path.
+The `mediaPlayback` foreground service type (already declared in manifest)
+is required for this to work when the screen is off on API 29+.
+
 ### Deliverables Checklist
 - [ ] `TTSProvider` interface defined
 - [ ] `PiperTTSProvider` implementation
 - [ ] `AndroidNativeTTSProvider` fallback
-- [ ] `TTSService` (foreground, handles BT routing)
-- [ ] Bluetooth audio routing (SCO profile)
+- [ ] `TTSService` — foreground (`mediaPlayback` type); wake lock; BT SCO routing sequence above
+- [ ] Bluetooth SCO audio routing + `ACTION_SCO_AUDIO_STATE_UPDATED` receiver
+- [ ] `AudioFocusRequest` management (screen-off safe)
 - [ ] Mode A/B/C selector (persisted in preferences)
 - [ ] `PriorityClassifier` (lightweight keyword + pattern matching for Mode C; no LLM in Phase 3)
 - [ ] Settings screen
 - [ ] Unit tests: `PriorityClassifierTest`, `TTSServiceTest`
-- [ ] BT integration test on real device
+- [ ] BT integration test on real device (Galaxy Fold, screen off)
 - [ ] Build instructions updated
 
 ### Success Criteria
@@ -779,6 +817,9 @@ Running record of actual measurements per phase. Update after each phase is comp
 | 6 | Mode C priority classifier precision on business Spanish | Medium | 3 | Open | Build test corpus of Guatemala business speech |
 | 7 | Benchmark model asset must be generated before first build | Low | 0 | Open | Run `python3 scripts/generate_benchmark_model.py`; CI should generate automatically |
 | 8 | NNAPI may produce different numerical results than CPU (FP16 rounding) | Low | 2 | Open | Acceptable for translation; test output quality on NNAPI vs CPU |
+| 9 | Battery Manager may throttle or kill services on some Samsung OEM builds | Medium | All | Open | Test on Galaxy Fold with "Unrestricted" battery mode; document in BUILD.md |
+| 10 | Bluetooth SCO setup latency (~300–500ms) may cause first-word TTS clipping | Medium | 3 | Open | Pre-connect SCO when a session starts rather than per-utterance |
+| 11 | Galaxy Fold cover display may suppress foreground service notifications | Low | All | Open | Test notification visibility on outer screen; user should see recording indicator |
 
 ---
 

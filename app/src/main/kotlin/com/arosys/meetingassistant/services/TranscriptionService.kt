@@ -6,8 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import com.arosys.meetingassistant.MeetingAssistantApp
 import com.arosys.meetingassistant.R
@@ -57,6 +60,11 @@ class TranscriptionService : Service() {
     private var mic: MicrophoneAudioSource? = null
     private var transcriptionJob: Job? = null
 
+    // Held while recording so the CPU keeps running when the screen turns off.
+    // Without this, Android suspends background threads and Whisper inference
+    // stalls when the user pockets the phone or folds the Fold.
+    private lateinit var wakeLock: PowerManager.WakeLock
+
     private val _uiState = MutableStateFlow(TranscriptionState())
     val uiState: StateFlow<TranscriptionState> = _uiState.asStateFlow()
 
@@ -68,6 +76,9 @@ class TranscriptionService : Service() {
         super.onCreate()
         recognizer = WhisperOnnxSpeechRecognizer(applicationContext)
         storage = RoomStorageProvider(AppDatabase.getInstance(applicationContext))
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "arosys:recording")
+            .apply { setReferenceCounted(false) }
         createNotificationChannel()
         Log.d(TAG, "Service created")
     }
@@ -87,7 +98,13 @@ class TranscriptionService : Service() {
     fun startSession(meetingTitle: String = "Meeting") {
         if (_uiState.value.sessionState != SessionState.IDLE) return
         _uiState.value = _uiState.value.copy(sessionState = SessionState.STARTING)
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
+        if (!wakeLock.isHeld) wakeLock.acquire()
 
         transcriptionJob = scope.launch {
             try {
@@ -140,6 +157,7 @@ class TranscriptionService : Service() {
             _uiState.value.currentMeetingId?.let { id ->
                 storage.finalizeMeeting(id)
             }
+            if (wakeLock.isHeld) wakeLock.release()
             _uiState.value = _uiState.value.copy(sessionState = SessionState.IDLE)
             stopForeground(STOP_FOREGROUND_REMOVE)
             Log.i(TAG, "Session stopped")

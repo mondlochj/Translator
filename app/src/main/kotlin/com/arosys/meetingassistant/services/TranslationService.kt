@@ -5,8 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import com.arosys.meetingassistant.MeetingAssistantApp
 import com.arosys.meetingassistant.core.interfaces.TranslationEngine
@@ -47,6 +50,7 @@ class TranslationService : Service() {
     lateinit var storage: StorageProvider
 
     private var translationJob: Job? = null
+    private lateinit var wakeLock: PowerManager.WakeLock
 
     private val _state = MutableStateFlow(TranslationState())
     val state: StateFlow<TranslationState> = _state.asStateFlow()
@@ -55,12 +59,21 @@ class TranslationService : Service() {
         super.onCreate()
         engine  = NLLBTranslationEngine(applicationContext)
         storage = RoomStorageProvider(AppDatabase.getInstance(applicationContext))
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "arosys:translation")
+            .apply { setReferenceCounted(false) }
         createNotificationChannel()
         Log.d(TAG, "Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, buildNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification())
+        }
+        if (!wakeLock.isHeld) wakeLock.acquire()
         startTranslating()
         return START_STICKY
     }
@@ -69,6 +82,7 @@ class TranslationService : Service() {
 
     override fun onDestroy() {
         translationJob?.cancel()
+        if (wakeLock.isHeld) wakeLock.release()
         engine.close()
         super.onDestroy()
     }
